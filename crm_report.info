@@ -1,0 +1,5 @@
+name = CRM Report
+description = Automated report on CRM constituent records.
+core = 7.x
+php = 5.2
+files[] = crm_report.module

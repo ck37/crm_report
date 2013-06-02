@@ -1,0 +1,543 @@
+<?php
+
+function crm_report_menu() {
+  $items = array();
+
+  $items['crm_report/view'] = array(
+    'title' => 'View last CRM report',
+    'page callback' => 'crm_report_view',
+    'access arguments' => array('administrator'), 
+  );
+
+  $items['crm_report/trigger'] = array(
+    'title' => 'Run a new CRM report',
+    'page callback' => 'crm_report_trigger',
+    'access arguments' => array('administrator'), 
+  );
+
+  $items['crm_report/resend'] = array(
+    'title' => 'Resend CRM report',
+    'page callback' => 'crm_report_theme_and_send',
+    'access arguments' => array('administrator'), 
+  );
+
+  $items['crm_report/config'] = array(
+    'title' => 'Configure CRM report',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('crm_report_configuration_form'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
+  );
+
+  return $items;
+}
+
+function crm_report_configuration_form($form_state) {
+  global $user;
+    // Configure the CRM Report Module.
+    $form['hour_to_run'] = array(
+        '#type' => 'select',
+        '#title' => t('Hour to Run'),
+        '#default_value' => variable_get('_online_report_hour_to_run', '7'), 
+        '#options' => array(
+            '1' => t('1 AM'),
+            '2' => t('2 AM'),
+            '3' => t('3 AM'),
+            '4' => t('4 AM'),
+            '5' => t('5 AM'),
+            '6' => t('6 AM'),
+            '7' => t('7 AM'),
+            '8' => t('8 AM'),
+            '9' => t('9 AM'),
+            '10' => t('10 AM'),
+            '11' => t('11 AM'),
+            '12' => t('Noon'),
+            '13' => t('1 PM'),
+            '14' => t('2 PM'),
+            '15' => t('3 PM'),
+            '16' => t('4 PM'),
+            '17' => t('5 PM'),
+            '18' => t('6 PM'),
+            '19' => t('7 PM'),
+            '20' => t('8 PM'),
+            '21' => t('9 PM'),
+            '22' => t('10 PM'),
+            '23' => t('11 PM'),
+            '24' => t('Midnight'),
+        ),
+        '#description' => t('Hour of the day to run and send this report.'),
+    );
+
+    $form['days_to_run'] = array(
+        '#type' => 'checkboxes',
+        '#title' => t('Days to Run'),
+        '#options' => array(
+            'Mon' => 'Monday',
+            'Tue' => 'Tuesday',
+            'Wed' => 'Wednesday',
+            'Thu' => 'Thursday',
+            'Fri' => 'Friday',
+            'Sat' => 'Saturday',
+            'Sun' => 'Sunday',
+        ),
+        '#default_value' => variable_get('_online_report_days_to_run', array('Mon','Thu',0,0,0,0,0)),
+        '#description' => t('Days of the week to run and send this report.'),
+    );
+
+
+    $form['email_recipients'] = array(
+        '#type' => 'textarea',
+        '#title' => t('Email Recipients'),
+        '#default_value' => variable_get('_online_report_email_recipients', "root@localhost"), 
+        '#cols' => 60,
+        '#rows' => 4,
+        '#description' => t('Comma separated list of email addresses to send report to.'),
+    );
+
+    $user_data = user_load($user->uid);
+
+    $form['email_sender'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Email Sender'),
+        '#default_value' => variable_get('_online_report_email_sender', $user_data->mail), 
+        '#cols' => 60,
+        '#rows' => 4,
+        '#description' => t('Comma separated list of email addresses to send report to.'),
+    );
+
+    $form['crm'] = array(
+      '#type' => 'select',
+      '#title' => 'CRM',
+      '#options' => array(
+        'bsd' => 'Blue State Digital',
+      ),
+      '#default_value' => variable_get('_online_report_crm', 'bsd'),
+    );
+
+
+    $form['db_type'] = array(
+      '#type' => 'select',
+      '#title' => 'Database Type',
+      '#options' => array(
+        'mysql' => 'MySQL',
+        'pgsql' => 'PostgresSQL',
+        'dblist' => 'MSSQL',
+        'oci' => 'Oracle',
+        'odbc' => 'ODBC',
+        'sqlite' => 'SQLite'
+      ),
+      '#default_value' => variable_get('_online_report_db_type', 'mysql'),
+    );
+
+    $form['db_host'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Database Host',
+      '#default_value' => variable_get('_online_report_db_host', 'localhost'),
+    );
+
+    $form['db_port'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Database Port',
+      '#default_value' => variable_get('_online_report_db_port', '3306'),
+    );
+
+
+    $form['db_name'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Database Name',
+      '#default_value' => variable_get('_online_report_db_name'),
+    );
+
+    $form['db_user'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Database User',
+      '#default_value' => variable_get('_online_report_db_user'),
+    );
+
+    $form['db_password'] = array(
+      '#type' => 'password',
+      '#title' => 'Database Password',
+      '#default_value' => variable_get('_online_report_db_password'),
+    );
+
+    // saves and executes a submission callback, see $form["#submit"] for that
+    $form['save'] = array(
+        '#type' => 'submit',
+        '#value' => t('Save'),
+        '#executes_submit_callback' => true
+    );
+                                 
+    $form['#submit'] = array(
+        '_crm_report_configuration_form_submit'
+    );
+                                                 
+    return $form;
+
+
+}
+
+function _crm_report_configuration_form_submit($form, &$form_state){
+    // Parse and act on the submitted form
+
+    // Hour to Run
+    $hour_to_run_report = $form_state['values']['hour_to_run'];
+    variable_set('_online_report_hour_to_run', $hour_to_run_report);
+
+    // Day to Run
+    $days_to_run_report = $form_state['values']['days_to_run'];
+    variable_set('_online_report_days_to_run', $days_to_run_report);
+
+    // Email Recipients
+    $email_recipients = $form_state['values']['email_recipients'];
+    variable_set('_online_report_email_recipients', $email_recipients);
+
+
+    $db_variables = array('db_type', 'db_host', 'db_port', 'db_name', 'db_user', 'db_password', 'crm', 'email_sender');
+    foreach ($db_variables as $value) {
+      //drupal_set_message($value . ' = ' . $form_state['values'][$value]);
+      variable_set('_online_report_'. $value, $form_state['values'][$value]);
+    }
+
+}
+
+function crm_report_view() {
+  // View the latest online report.
+  $filename = variable_get('crm_report_last_filename', NULL);
+  $output = '';
+  if (!$filename) {
+    $output .= 'Error: could not load last file ' . $filename;
+  }
+  else {
+    $file = file($filename);
+    //$output .= '<h3>Last Online Report</h3>';
+    $output .= '<p><a href="/crm_report/trigger">Update the report</a></p>';
+    $output .= implode($file, '');
+  }
+  return $output;
+}
+
+function crm_report_trigger() {
+  crm_report_run();
+  drupal_set_message('Ran the online report');
+  
+  drupal_goto('crm_report/view');
+}
+
+function crm_report_cron() {
+  // See if it has been X hours since last run.
+  $current_time = time();
+  $last_run = variable_get('online_report_last_cron_run', 0);
+  /*
+  $hours_between_reports = 12;
+  if ((($current_time - $last_run) / 3600) <= $hours_between_reports) {
+    // Not enough time has elapsed, so keep waiting.
+    return;
+  }
+  */
+  $hours_since_last_report = floor(($current_time - $last_run) / 3600);
+  $hour_to_run = variable_get('_online_report_hour_to_run', '7');
+
+
+  // g = 12-hour format, G = 24-hour format
+  $current_hour = date('G', $current_time);
+  // Mon through Sun.
+  $current_day = date('D', $current_time);
+
+  $cron_recipients = variable_get('_online_report_email_recipients');  
+  $days_to_run = variable_get('_online_report_days_to_run');  
+
+  // Note: this in_array() comparison must be strict for the string comparison.
+  if ($hours_since_last_report > 0 && $current_hour == $hour_to_run && in_array($current_day, $days_to_run, TRUE) ) {
+    // Save current run time.
+    variable_set('online_report_last_cron_run', $current_time);
+    crm_report_run($cron_recipients);
+  }
+}
+
+function crm_report_run($recipients = NULL) {
+  $current_time = time();
+
+  $extra_data = array();
+
+  // Run the queries.
+  $results = _crm_report_run_queries();
+  
+  // Save the results.
+  variable_set('crm_report_last_results', $results);
+  variable_set('crm_report_last_results_time', $current_time);
+
+  // Calculate the query runtime.
+  $runtime = time() - $current_time;
+  variable_set('crm_report_last_runtime', $runtime);
+
+  // Theme the results.
+  $themed_results = _crm_report_theme_results($results, $extra_data);
+
+  // Save the results to a temp file.
+  _crm_report_save_data($themed_results, $extra_data);
+
+  // Generate and send the email.
+  _crm_report_mail_results($themed_results, $recipients);
+}
+
+function crm_report_theme_and_send() {
+  $results = variable_get('crm_report_last_results');
+  $extra_data = array();
+
+  // Theme the results.
+  $themed_results = _crm_report_theme_results($results, $extra_data);
+
+  // Save the results to a temp file.
+  _crm_report_save_data($themed_results, $extra_data);
+
+  // Generate and send the email.
+  _crm_report_mail_results($themed_results);
+  drupal_goto('crm_report/view');
+}
+
+function _crm_report_save_data($results, $extra_data) {
+  $filename = 'crm_report-'. date('Y-m-d--Gis') . '.html';
+  $filename = file_default_scheme() . '://' . $filename;
+  $fp = fopen($filename, 'w');
+  fwrite($fp, $results);
+  fclose($fp);
+
+  variable_set('crm_report_last_filename', $filename);
+}
+
+function _crm_report_mail_results($message, $recipients = NULL) {
+  global $user;
+
+  $subject = 'Member Report ' . date('Y-m-d ga'); // "8pm" formatting.
+  $email_from = variable_get('_online_report_email_sender');
+
+  if (!$recipients) {
+    // Send to the user who submitted the report if there isn't a recipient list.
+    $user_data = user_load($user->uid);
+    $recipients = $user_data->mail;
+  }
+
+  $headers = array();
+  $headers[] = 'From: ' . $email_from;
+  $headers[] = 'MIME-Version: 1.0';
+  $headers[] = 'Content-type: text/html; charset=iso-8859-1';
+  $headers_str = implode($headers, "\r\n");
+
+  // HTML header.
+  $message = '<html><body>' . $message;
+
+  // HTML footer.
+  $message .= '</body></html>';
+
+  mail($recipients, $subject, $message, $headers_str, '-f' . $email_from);
+}
+
+function _crm_report_run_queries() {
+  $crm_db = _crm_report_get_crm_database();
+  $result_store = array(); 
+
+  // Overall membership size.
+  $sql = 'SELECT count(*) total, SUM(IF(cs.isunsub = 0, 1, 0)) subscribed, SUM(cs.isunsub) unsubscribed, SUM(IF(cs.isunsub IS NULL, 1, 0)) no_email
+  FROM cons c
+  LEFT JOIN cons_email ce ON (c.cons_id = ce.cons_id AND ce.is_primary = 1)
+  LEFT JOIN cons_email_chapter_subscription cs ON (ce.cons_email_id = cs.cons_email_id);';
+  $result = $crm_db->query($sql);
+  if ($result) {
+    $result_store['overall'] = array('data' => $result->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  // Member Growth: Past 7 days.
+  $sql = '/* Subscribed/unsubscribed members from the previous 7 days. */
+SELECT nu.cur_date, total_new, unsubscribed
+FROM (
+  SELECT DATE(c.create_dt) cur_date, COUNT(*) total_new, SUM(IF(cs.isunsub = 0, 1, 0)) new_subscribed, SUM(IF(cs.isunsub IS NULL, 1, 0)) new_no_email
+  FROM cons c
+  JOIN cons_email ce ON (c.cons_id = ce.cons_id AND ce.is_primary = 1)
+  JOIN cons_email_chapter_subscription cs ON (ce.cons_email_id = cs.cons_email_id)
+  WHERE is_deleted = 0
+    AND c.create_dt >= DATE(NOW()) - INTERVAL 6 DAY
+  GROUP BY 1
+) nu
+LEFT JOIN (
+  SELECT DATE(unsub_dt) cur_date, COUNT(*) unsubscribed
+  FROM cons c
+  JOIN cons_email ce ON (c.cons_id = ce.cons_id AND ce.is_primary = 1)
+  JOIN cons_email_chapter_subscription cs ON (ce.cons_email_id = cs.cons_email_id)
+  WHERE cs.isunsub = 1 AND is_deleted = 0
+    AND cs.unsub_dt >= DATE(NOW()) - INTERVAL 6 DAY
+  GROUP BY 1
+) unsubs ON (nu.cur_date = unsubs.cur_date)
+ORDER BY 1 DESC;
+  ';
+  $result = $crm_db->query($sql);
+  if ($result) {
+    $result_store['recent_new_members'] = array('data' => $result->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  // Top actions.
+  $sql = '
+/* Top actions from the past 7 days. */
+SELECT  
+  IF (signup_form_id IS NOT NULL, "signup", IF (invite_page_id IS NOT NULL, "invite", IF (contribution_page_id IS NOT NULL, "contribution", IF(spk_campaign_id IS NOT NULL, "speakout", "unknown")))) form_type,
+  IFNULL(signup_form_name, IFNULL(ip.name, IFNULL(sc.title, IFNULL(cp.name, "-")))) form_name,
+  count(*) new_users,
+  IFNULL(signup_form_id, IFNULL(invite_page_id, IFNULL(contribution_page_id, IFNULL(spk_campaign_id, "0")))) form_id
+FROM (
+SELECT c.*, signup_form_id, invite_page_id, contribution_page_id, spk_campaign_id
+FROM
+(
+  SELECT c.cons_id
+  FROM cons c
+  WHERE create_dt > NOW() - INTERVAL 7 DAY
+) c
+LEFT JOIN cons_action ca USING (cons_id)
+LEFT JOIN cons_action_signup cas USING (cons_action_signup_id)
+LEFT JOIN cons_action_invitation cai USING (cons_action_invitation_id)
+LEFT JOIN cons_action_contribution cac USING (cons_action_contribution_id)
+LEFT JOIN stg_contribution USING (stg_contribution_id)
+LEFT JOIN cons_action_speakout_letter casl USING (cons_action_speakout_letter_id)
+GROUP BY c.cons_id /* Take the first action from each user. */
+ORDER BY cons_id, ca.cons_action_id
+) top_forms
+LEFT JOIN signup_form sf USING (signup_form_id)
+LEFT JOIN invite_page ip USING (invite_page_id)
+LEFT JOIN contribution_page cp USING (contribution_page_id)
+LEFT JOIN spk_campaign sc USING (spk_campaign_id)
+GROUP BY 1, 4
+ORDER BY COUNT(*) DESC
+LIMIT 10;
+  ';
+  $result = $crm_db->query($sql);
+  if ($result) {
+    $result_store['recent_actions'] = array('data' => $result->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  // Top 10 sources from past 7 days.
+  $sql = '
+/* Top source codes from the past 7 days. */
+SELECT source, count(*) new_users/*, SUM(cs.isunsub) unsubscribed*/
+FROM cons c
+/*
+LEFT JOIN cons_email_chapter_subscription cs ON (c.primary_cons_email_id = cs.cons_email_id)
+*/
+WHERE c.create_dt > NOW() - INTERVAL 7 DAY
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 10;
+  ';
+  $result = $crm_db->query($sql);
+  if ($result) {
+    $result_store['recent_sources'] = array('data' => $result->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  // Bounces.
+  $sql = '
+/* Email bounces by day for the past 7 days. */
+SELECT DATE(create_dt) the_day, count(*) bounces
+FROM mailing_bounce mb
+  WHERE create_dt >= NOW() - INTERVAL 7 DAY
+GROUP BY 1
+ORDER BY 1 DESC;
+';
+ $result = $crm_db->query($sql);
+  if ($result) {
+    $result_store['recent_bounces'] = array('data' => $result->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  // Recent uploads.
+  $sql = '/* Uploads from the past 3 days. */
+  SELECT DATE(cu.create_dt) start_dt, CONCAT(au.firstname, " ", au.lastname) admin_name, cu.filename, /*cons_upload_id,*/ /* signup_form_id,*/ sf.signup_form_name, /*was_completed, sstc_completed, */ total_rows, rows_ok, rows_reject, FLOOR(cu.modified_dt - cu.create_dt) runtime
+  FROM cons_upload cu
+  JOIN admin_user au USING (admin_user_id)
+  LEFT JOIN signup_form sf USING (signup_form_id)
+  WHERE cu.create_dt >= NOW() - INTERVAL 3 DAY
+  ORDER BY cons_upload_id DESC;';
+  $result = $crm_db->query($sql);
+  if ($result) {
+    $result_store['recent_uploads'] = array('data' => $result->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  return $result_store;
+}
+
+function _crm_report_theme_results($results, $extra_data) {
+  $themed_results = '';
+
+  $table_attributes = array('cellpadding' => 2, 'style' => 'border: 1px solid #e0e0e0');
+  $header_style = "padding-bottom: 0; margin-bottom: 0";
+  $theme_data = array('table_attributes' => $table_attributes, 'header_style' => $header_style);
+
+  // Overall
+  $themed_results .= theme('crm_report_results_overall', array('data' => $results['overall']['data'], 'theme_data' => $theme_data));
+
+  // Past 7 days.
+  $themed_results .= theme('crm_report_results_recent_new_members', array('data' => $results['recent_new_members']['data'], 'theme_data' => $theme_data, 'overall' => $results['overall']['data'][0]));
+
+  // Top 5 actions.
+  $themed_results .= theme('crm_report_results_recent_actions', array('data' => $results['recent_actions']['data'], 'theme_data' => $theme_data));
+
+  // Top 10 sources.
+  $themed_results .= theme('crm_report_results_recent_sources', array('data' => $results['recent_sources']['data'], 'theme_data' => $theme_data));
+
+  // Bounces.
+  $themed_results .= theme('crm_report_results_recent_bounces', array('data' => $results['recent_bounces']['data'], 'theme_data' => $theme_data));
+
+  // Uploads.
+  $themed_results .= theme('crm_report_results_recent_uploads', array('data' => $results['recent_uploads']['data'], 'theme_data' => $theme_data));
+ 
+  // Byline.
+  $themed_results .= '<p>Automated report for the Alliance for Climate Protection. The contents of this report are strictly confidential and may not be forwarded to any third parties.</p>';
+
+  $runtime = variable_get('crm_report_last_runtime');
+
+  // Runtime.
+  $themed_results .= 'This report took ' . $runtime . ' seconds.';
+
+
+  return $themed_results;
+}
+
+function crm_report_theme() {
+  return array(
+    'crm_report_results_overall' => array(
+      'template' => 'templates/results-overall',
+      'variables' => array('results' => NULL, 'theme_data' => NULL),
+    ),
+    'crm_report_results_recent_new_members' => array(
+      'template' => 'templates/recent-new-members',
+      'variables' => array('results' => NULL, 'theme_data' => NULL),
+    ),
+    'crm_report_results_recent_bounces' => array(
+      'template' => 'templates/recent-bounces',
+      'variables' => array('results' => NULL),
+    ),
+    'crm_report_results_recent_actions' => array(
+      'template' => 'templates/recent-actions',
+      'variables' => array('results' => NULL),
+    ),
+    'crm_report_results_recent_sources' => array(
+      'template' => 'templates/recent-sources',
+      'variables' => array('results' => NULL),
+    ),
+    'crm_report_results_recent_uploads' => array(
+      'template' => 'templates/recent-uploads',
+      'variables' => array('results' => NULL),
+    ),
+
+
+  );
+}
+
+function _crm_report_get_crm_database() {
+  static $crm_db = NULL;
+  if (!$crm_db) {
+    $db_host = variable_get('_online_report_db_host');
+    $db_user = variable_get('_online_report_db_user');
+    $db_password = variable_get('_online_report_db_password');
+    $db_name = variable_get('_online_report_db_name');
+    $db_port = variable_get('_online_report_db_port');
+    $db_config = variable_get('_online_report_db_type') . ':host=' . $db_host . ';dbname=' . $db_name . ';port=' . $db_port;
+    $crm_db = new PDO($db_config, $db_user, $db_password);
+  }
+  return $crm_db;
+}
